@@ -1,0 +1,16 @@
+# Deep Learning and Image Processing
+tensorflow>=2.10.0
+Pillow>=9.0.0
+
+# Numerical Computing and Data Handling
+numpy>=1.20.0
+pandas>=1.4.0
+
+# Machine Learning (Clustering)
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.5.0
+
+# Vector Database
+chromadb>=0.4.0
