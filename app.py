@@ -474,18 +474,19 @@ async def cluster_from_upload(
 # =============================================================================
 # 5. Run the Server
 # =============================================================================
-
-if __name__ == "__main__":
+def main():
     """Run the API server with Uvicorn."""
     app_logger.info(f"Starting API server at http://{HOST}:{PORT}")
     app_logger.info(f"View API docs at http://{HOST}:{PORT}/docs")
     app_logger.info(f"Debug mode: {DEBUG}")
     
     uvicorn.run(
-        "__main__:app", # Use "__main__:app" when running script directly
+        "app:app",
         host=HOST, 
         port=PORT, 
         reload=DEBUG,
-        log_config=None # Disable uvicorn's default access logging
+        log_config=None
     )
 
+if __name__ == "__main__":
+    main()

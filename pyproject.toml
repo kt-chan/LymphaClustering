@@ -1,0 +1,53 @@
+[project]
+name = "lymphaclustering"
+version = "1.0.0"
+description = "API for clustering WSI slides using ResNet50 and LanceDB"
+authors = [
+    {name = "chan chi wai", email = "your.email@example.com"},
+]
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE*"]  # Glob pattern for license files
+keywords = ["histology", "clustering", "machine-learning", "fastapi", "lancedb"]
+
+dependencies = [
+    # --- Deep Learning / Feature Extraction ---
+    "tensorflow==2.20.0",
+    "numpy<2.3.0,>=2",
+    "Pillow>=10.4.0",
+    
+    # --- Core Scientific Computing ---
+    "pandas>=2.2.2",
+    "scikit-learn>=1.5.1",
+    
+    # --- Vector Database ---
+    "lancedb>=0.25.3",
+    "pyarrow>=17.0.0",
+    
+    # --- API Framework ---
+    "fastapi==0.121.2",
+    "uvicorn[standard]==0.38.0",
+    "python-multipart==0.0.20",
+    
+    # --- Environment & Utilities ---
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+histology-api = "app:main"
+
+[build-system]
+requires = ["setuptools>=77.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["db*", "data*", "tests*", "test*", "docs*", "doc*", "examples*"] 
+
+# UV package manager configuration for China mirrors (CORRECTED FORMAT)
+[tool.uv.pip]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+extra-index-url = [
+    "https://mirrors.aliyun.com/pypi/simple/",
+    "https://pypi.org/simple"
+]

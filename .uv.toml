@@ -1,0 +1,16 @@
+# .uv.toml
+[index]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[[index.extra]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[index.extra]]
+url = "https://pypi.org/simple"
+
+[cache]
+dir = ".uv-cache"
+
+[network]
+retries = 5
+timeout = 30
