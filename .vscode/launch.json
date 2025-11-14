@@ -4,12 +4,36 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        // {
+        //     "name": "Python Debug LymphaNodeClustering",
+        //     "type": "debugpy",
+        //     "request": "launch",
+        //     "program": "LymphaNodeClustering.py",
+        //     "console": "integratedTerminal"
+        // },
         {
-            "name": "Python Debug",
+            "name": "Debug FastAPI (Uvicorn)",
             "type": "debugpy",
             "request": "launch",
-            "program": "LymphaNodeClustering.py",
-            "console": "integratedTerminal"
-        }
+            // Use 'python -m uvicorn' to launch the server as a module
+            "module": "uvicorn",
+            "args": [
+                "app:app",
+                "--reload"
+            ],
+            // Stop the server when debugging ends
+            "justMyCode": true,
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        // {
+        //     "name": "Debug FastAPI (Uvicorn)",
+        //     "type": "debugpy",
+        //     "request": "launch",
+        //     "program": "app.py",
+        //     "justMyCode": true,
+        //     "console": "integratedTerminal",
+        //     "envFile": "${workspaceFolder}/.env"
+        // }
     ]
 }

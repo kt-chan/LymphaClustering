@@ -23,7 +23,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $venvPath = ".\venv"
 if (Test-Path $venvPath) {
     Write-Host "Virtual environment exists at $venvPath. Checking if Python version is up to date..."
-    conda update --prefix $venvPath --yes python=3.12
+    conda install --prefix $venvPath --yes python=3.12
 } else {
     Write-Host "Creating conda environment at $venvPath..."
     conda create --prefix $venvPath --yes python=3.12
@@ -40,6 +40,7 @@ $env:UV_CACHE_DIR = "D:\\.cache\\uv"
 
 # Install or upgrade all packages using uv with the specified Python
 Write-Host "Installing or upgrading packages with uv..."
-uv pip install --python $pythonPath --upgrade -r requirements.txt
+conda activate $venvPath
+uv pip install --upgrade -r requirements.txt
 
 Write-Host "Setup completed successfully."
