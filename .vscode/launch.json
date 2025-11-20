@@ -15,6 +15,15 @@
             "name": "Debug FastAPI (Uvicorn)",
             "type": "debugpy",
             "request": "launch",
+            "program": "app.py",
+            "justMyCode": true,
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "RUN FastAPI (Uvicorn)",
+            "type": "debugpy",
+            "request": "launch",
             // Use 'python -m uvicorn' to launch the server as a module
             "module": "uvicorn",
             "args": [
@@ -25,15 +34,6 @@
             "justMyCode": true,
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env"
-        },
-        // {
-        //     "name": "Debug FastAPI (Uvicorn)",
-        //     "type": "debugpy",
-        //     "request": "launch",
-        //     "program": "app.py",
-        //     "justMyCode": true,
-        //     "console": "integratedTerminal",
-        //     "envFile": "${workspaceFolder}/.env"
-        // }
+        }
     ]
 }

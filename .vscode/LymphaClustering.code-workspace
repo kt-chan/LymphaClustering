@@ -4,5 +4,11 @@
 			"path": ".."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"editor.rename.enablePreview": false,
+		"editor.defaultFormatter": "ms-python.black-formatter",
+		"[jsonc]": {
+			"editor.defaultFormatter": "vscode.json-language-features"
+		}
+	}
 }

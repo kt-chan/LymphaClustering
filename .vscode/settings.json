@@ -1,0 +1,4 @@
+{
+    "editor.rename.enablePreview": false,
+    "editor.defaultFormatter": "ms-python.black-formatter"
+}

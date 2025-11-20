@@ -51,3 +51,7 @@ extra-index-url = [
     "https://mirrors.aliyun.com/pypi/simple/",
     "https://pypi.org/simple"
 ]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
