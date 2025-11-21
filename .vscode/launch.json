@@ -15,7 +15,7 @@
             "name": "Debug FastAPI (Uvicorn)",
             "type": "debugpy",
             "request": "launch",
-            "program": "app.py",
+            "program": "lymphaclustering/app.py",
             "justMyCode": true,
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env"
@@ -27,7 +27,7 @@
             // Use 'python -m uvicorn' to launch the server as a module
             "module": "uvicorn",
             "args": [
-                "app:app",
+                "lymphaclustering/app:app",
                 "--reload"
             ],
             // Stop the server when debugging ends

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  lymphaclustering:
+    build:
+      context: ..  # Important: context is project root
+      dockerfile: docker/Dockerfile
+    image: lymphaclustering:1.0.0  # Use local image instead of building
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data  # if you need persistent data
+      - ../db:/app/db      # if you need persistent database
+      - ../.env:/app/.env
+    working_dir: /app
+    command: python3 -m uvicorn app:main --host 0.0.0.0 --port 8000
+    restart: unless-stopped

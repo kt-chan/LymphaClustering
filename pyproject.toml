@@ -29,13 +29,19 @@ dependencies = [
     "fastapi==0.121.2",
     "uvicorn[standard]==0.38.0",
     "python-multipart==0.0.20",
-    
+
+    # ---- Torch with CUDA ----
+    # "timm==0.9.8",
+    # "torch==2.8.0",
+    # "torchvision==0.23.0",
+    # "torchaudio==2.8.0",
+
     # --- Environment & Utilities ---
     "python-dotenv>=1.0.0",
 ]
 
 [project.scripts]
-histology-api = "app:main"
+histology-api = "lymphaclustering.app:main"
 
 [build-system]
 requires = ["setuptools>=77.0.0", "wheel"]
