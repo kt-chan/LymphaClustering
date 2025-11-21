@@ -104,8 +104,8 @@ class TuningRequest(BaseModel):
 
 class DirectoryRequest(BaseModel):
     path: str = ""  # Default to empty string
-    db_path: str = DEFAULT_DB_PATH
-    table_name: str = DEFAULT_TABLE_NAME
+    # db_path: str = DEFAULT_DB_PATH
+    # table_name: str = DEFAULT_TABLE_NAME
     threshold: Optional[float] = DEFAULT_DISTANCE_THRESHOLD
 
 
@@ -172,7 +172,10 @@ def _run_clustering(df: pd.DataFrame, threshold: float) -> pd.DataFrame:
 
     if not final_dfs:
         return df, single_vector
-    return pd.concat(final_dfs, ignore_index=True), single_vector
+
+    # 4. Save & Response
+    clustered_df = pd.concat(final_dfs, ignore_index=True)
+    return clustered_df, single_vector
 
 
 def _run_tuning_simulation(data_df: pd.DataFrame, ground_truth: Dict[str, int]):
@@ -237,6 +240,30 @@ def _run_tuning_simulation(data_df: pd.DataFrame, ground_truth: Dict[str, int]):
     return results[0], results, list(set(errors))
 
 
+def _save_to_vectordb(clustered_df: pd.DataFrame):
+    db_path = DEFAULT_DB_PATH
+    table_name = DEFAULT_TABLE_NAME
+    try:
+        # 4. Save to LanceDB with UPSERT
+        db = lancedb.connect(db_path)
+
+        # Check if table exists, create if not
+        if table_name not in db.table_names():
+            app_logger.info(f"Creating new table: {table_name}")
+            table = db.create_table(table_name, data=clustered_df, mode="overwrite")
+            app_logger.info(f"Table schema for table:{table_name}, schema: {table.schema}")
+        else:
+            table = db.open_table(table_name)
+            # Upsert records using slide_id as the key
+            app_logger.info(f"Upserting {len(clustered_df)} records into existing table: {table_name}")
+            table.add(clustered_df, mode="overwrite")
+
+    except Exception as e:
+        app_logger.error(f"VectorDB Error: {e}", exc_info=True)
+        return False
+    return True
+
+
 # =============================================================================
 # 4. API Endpoints
 # =============================================================================
@@ -248,9 +275,9 @@ async def tune_parameters(request: TuningRequest = Body(...)):
     Scans nested folders, matches against CSV Ground Truth, finds best Threshold.
     """
     try:
-        start_time = time.time()
+        tsnow = datetime.now().isoformat()
         app_logger.info("=" * 64)
-        app_logger.info(f"Requesting tune_parameters on {start_time} ...")
+        app_logger.info(f"Requesting tune_parameters on {tsnow} ...")
         app_logger.info("=" * 64)
         # 1. Load Ground Truth
         search_root = os.path.join(DATA_DIR, request.path)
@@ -290,7 +317,7 @@ async def tune_parameters(request: TuningRequest = Body(...)):
             if wsi_id in ground_truth_map:
                 vec = _extract_vector(model, p)
                 if vec:
-                    all_data.append({"file_name": fname, "wsi_id": wsi_id, "slide_id": slide_id, "vector": vec})
+                    all_data.append({"slide_id": slide_id, "wsi_id": wsi_id, "timestamp": tsnow, "vector": vec})
 
         if not all_data:
             raise HTTPException(404, "No images matched the WSI IDs in your CSV.")
@@ -299,6 +326,10 @@ async def tune_parameters(request: TuningRequest = Body(...)):
 
         # 4. Run Simulation
         best_param, all_results, errors = _run_tuning_simulation(data_df, ground_truth_map)
+
+        # 5. Add best result to vector db
+        clustered_df, single_slides = _run_clustering(data_df, threshold=float(best_param["threshold"]))
+        success = _save_to_vectordb(clustered_df)
 
         result = {
             "status": "success",
@@ -332,9 +363,10 @@ async def cluster_from_directory(request: DirectoryRequest = Body(...)):
     Production Endpoint. Recursive scan + Clustering.
     """
     try:
+        tsnow = datetime.now().isoformat()
         # 1. Recursive Scan
         search_root = os.path.join(DATA_DIR, request.path)
-        app_logger.info(f"Clustering images in: {search_root}")
+        app_logger.info(f"Clustering images in: {search_root} at {tsnow}")
 
         image_paths = []
         for ext in SUPPORTED_EXTENSIONS:
@@ -354,7 +386,7 @@ async def cluster_from_directory(request: DirectoryRequest = Body(...)):
             slide_id = fname
             vec = _extract_vector(model, p)
             if vec:
-                all_data.append({"file_name": fname, "wsi_id": wsi_id, "slide_id": slide_id, "vector": vec})
+                all_data.append({"slide_id": slide_id, "wsi_id": wsi_id, "timestamp": tsnow, "vector": vec})
 
         if not all_data:
             raise HTTPException(400, "No valid images processed.")
@@ -362,20 +394,13 @@ async def cluster_from_directory(request: DirectoryRequest = Body(...)):
         # 3. Cluster
         active_thresh = request.threshold if request.threshold is not None else DEFAULT_DISTANCE_THRESHOLD
         clustered_df, single_slide = _run_clustering(pd.DataFrame(all_data), threshold=active_thresh)
-
-        # 4. Save & Response
-        db = lancedb.connect(request.db_path)
-        try:
-            db.drop_table(request.table_name)
-        except:
-            pass
-        db.create_table(request.table_name, data=clustered_df)
+        success = _save_to_vectordb(clustered_df)
 
         results = []
         for wsi_id, w_group in clustered_df.groupby("wsi_id"):
             clusters = []
             for c_id, c_group in w_group.groupby("cluster_id"):
-                clusters.append({"cluster_id": int(c_id), "slides": c_group["file_name"].tolist()})
+                clusters.append({"cluster_id": int(c_id), "slides": c_group["slide_id"].tolist()})
             results.append({"wsi_id": wsi_id, "cluster_count": len(clusters), "clusters": clusters})
 
         app_logger.info(f"cluster results: {results}.")
