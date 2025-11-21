@@ -3,15 +3,41 @@ version: '3.8'
 services:
   lymphaclustering:
     build:
-      context: ..  # Important: context is project root
+      context: ..
       dockerfile: docker/Dockerfile
-    image: lymphaclustering:1.0.0  # Use local image instead of building
+      args:
+        - BUILD_ENV=production
+    image: lymphaclustering:1.0.0
+    container_name: lymphaclustering_app
     ports:
       - "8000:8000"
     volumes:
-      - ../data:/app/data  # if you need persistent data
-      - ../db:/app/db      # if you need persistent database
+      - /home/demo/models:/app/models
+      - ../data:/app/data
+      - ../db:/app/db
+      - ../logs:/app/logs
       - ../.env:/app/.env
     working_dir: /app
-    command: python3 -m uvicorn app:main --host 0.0.0.0 --port 8000
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ../.env  # Load environment variables from file
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]  # Adjust endpoint as needed
+      start_period: 30s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

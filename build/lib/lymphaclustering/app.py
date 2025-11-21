@@ -30,7 +30,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # UPDATED: New Data Directory
-DATA_DIR = os.getenv("DATA_DIR", r"D:\data\ruijin\Data\crops")
+# =============================================================================
+# Configuration & Environment
+# =============================================================================
+
+# --- SWITCH ---
+# Options: "resnet50" or "uni2-h"
+SELECTED_MODEL = os.getenv("SELECTED_MODEL", "uni2-h").lower()
+
+# --- Paths ---
+DATA_DIR = os.getenv("DATA_DIR", r"D:/data/ruijin/Data/crops")
+UNI_LOCAL_PATH = os.getenv("UNI_LOCAL_PATH", r"D:/models/huggingface/hub/uni2-h/pytorch_model.bin")
+RESNET50_LOCAL_PATH = os.getenv(
+    "RESNET50_LOCAL_PATH", r"D:/models/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5"
+)
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
 # =============================================================================
 # Logging Configuration

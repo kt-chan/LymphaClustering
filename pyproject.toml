@@ -12,8 +12,8 @@ license-files = ["LICENSE*"]  # Glob pattern for license files
 keywords = ["histology", "clustering", "machine-learning", "fastapi", "lancedb"]
 
 dependencies = [
-    # --- Deep Learning / Feature Extraction ---
-    "tensorflow==2.20.0",
+    # NOTE: TF 2.20.0 does not exist yet. Using >=2.17.0 to support NumPy 2.0
+    "tensorflow>=2.17.0", 
     "numpy<2.3.0,>=2",
     "Pillow>=10.4.0",
     
@@ -41,17 +41,17 @@ dependencies = [
 ]
 
 [project.scripts]
-histology-api = "lymphaclustering.app:main"
+histology-api = "lymphaclustering.app:app"
 
 [build-system]
-requires = ["setuptools>=77.0.0", "wheel"]
+requires = ["setuptools>=70.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 exclude = ["db*", "data*", "tests*", "test*", "docs*", "doc*", "examples*"] 
 
-# UV package manager configuration for China mirrors (CORRECTED FORMAT)
-[tool.uv.pip]
+# UV package manager configuration for China mirrors
+[tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 extra-index-url = [
     "https://mirrors.aliyun.com/pypi/simple/",
@@ -60,4 +60,4 @@ extra-index-url = [
 
 [tool.black]
 line-length = 120
-target-version = ["py310"]
+target-version = ["py312"]
