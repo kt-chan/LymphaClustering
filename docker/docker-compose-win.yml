@@ -12,12 +12,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - /mnt/dcs_ai/share/lymphaclustering/lymphaclustering/app.py:/app/lymphaclustering/app.py
-      - /mnt/dcs_ai/share/lymphaclustering/models:/app/models
-      - /mnt/dcs_ai/share/lymphaclustering/data:/app/data
-      - /mnt/dcs_ai/share/lymphaclustering/db:/app/db
-      - /mnt/dcs_ai/share/lymphaclustering/logs:/app/logs
-      - /mnt/dcs_ai/share/lymphaclustering/.env:/app/.env
+      - ../lymphaclustering/app.py:/app/lymphaclustering/app.py
+      - ../models:/app/models
+      - ../data:/app/data
+      - ../db:/app/db
+      - ../logs:/app/logs
+      - ../.env:/app/.env
     working_dir: /app
     environment:
       - PYTHONPATH=/app

@@ -1,24 +1,22 @@
 import numpy as np
 import os
 import json
-import re
-import io
-import time
 import uuid
 import logging
+import time
 from datetime import datetime
 from glob import glob
 from typing import List, Dict, Any, Optional
 
 # --- API & Server ---
 import uvicorn
-from fastapi import FastAPI, File, UploadFile, HTTPException, Body, Form
+from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 # --- ML & Data ---
 import lancedb
+from lancedb.pydantic import LanceModel, Vector
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
@@ -29,405 +27,482 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# UPDATED: New Data Directory
 # =============================================================================
-# Configuration & Environment
+# Configuration
 # =============================================================================
 
-# --- SWITCH ---
-# Options: "resnet50" or "uni2-h"
-SELECTED_MODEL = os.getenv("SELECTED_MODEL", "uni2-h").lower()
-
-# --- Paths ---
+# --- Paths & Settings ---
 DATA_DIR = os.getenv("DATA_DIR", r"D:/data/ruijin/Data/crops")
-UNI_LOCAL_PATH = os.getenv("UNI_LOCAL_PATH", r"D:/models/huggingface/hub/uni2-h/pytorch_model.bin")
 RESNET50_LOCAL_PATH = os.getenv(
     "RESNET50_LOCAL_PATH", r"D:/models/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5"
 )
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
-
-# =============================================================================
-# Logging Configuration
-# =============================================================================
-# Disable uvicorn default logging to avoid duplicates
-logging.getLogger("uvicorn.access").disabled = True
-logging.getLogger("uvicorn").setLevel(logging.WARNING)
-
-# Create logs directory if it doesn't exist
-LOG_DIR = "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
-
-# Generate log filename with timestamp
-LOG_FILENAME = f"app.log"
-LOG_FILEPATH = os.path.join(LOG_DIR, LOG_FILENAME)
-
-# Configure the application logger
-app_logger = logging.getLogger("api.application")
-app_logger.setLevel(logging.INFO)
-
-# Clear any existing handlers to avoid duplicates
-app_logger.handlers.clear()
-
-# Create formatter
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-# Console Handler (keeps your existing console output)
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-app_logger.addHandler(console_handler)
-
-# File Handler (new - logs to file)
-file_handler = logging.FileHandler(LOG_FILEPATH, encoding="utf-8")
-file_handler.setFormatter(formatter)
-app_logger.addHandler(file_handler)
-
-# Prevent propagation to root logger to avoid double logging
-app_logger.propagate = False
-
-app_logger.info(f"Logging initialized. Console and file logging enabled.")
-app_logger.info(f"Log file: {LOG_FILEPATH}")
-
-# =============================================================================
-# Environment Variables
-# =============================================================================
-HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", "8000"))
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-
-DEFAULT_DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "0.35"))
-
-IMAGE_TARGET_SIZE = tuple(map(int, os.getenv("IMAGE_TARGET_SIZE", "224,224").split(",")))
-SUPPORTED_EXTENSIONS = os.getenv("SUPPORTED_EXTENSIONS", "*.png").split(",")
+DEBUG_MODE = os.getenv("DEBUG", False)
 DEFAULT_DB_PATH = os.getenv("DEFAULT_DB_PATH", "lancedb_histology")
 DEFAULT_TABLE_NAME = os.getenv("DEFAULT_TABLE_NAME", "histology_specimens")
-
-MODEL_WEIGHTS = os.getenv("MODEL_WEIGHTS", "imagenet")
-MODEL_INCLUDE_TOP = os.getenv("MODEL_INCLUDE_TOP", "False").lower() == "true"
-MODEL_POOLING = os.getenv("MODEL_POOLING", "avg")
-
+IMAGE_TARGET_SIZE = (224, 224)
+BATCH_SIZE = 32  # Optimization: Batch size for inference
+VECTOR_DIM = 2048  # ResNet50 Avg Pooling dimension
 
 # =============================================================================
-# 1. Models
+# Logging
+# =============================================================================
+logging.getLogger("uvicorn.access").disabled = True
+app_logger = logging.getLogger("api.application")
+app_logger.setLevel(logging.INFO)
+app_logger.handlers.clear()
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+# Console & File Handlers
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+file_handler = logging.FileHandler(os.path.join(LOG_DIR, "app.log"), encoding="utf-8")
+file_handler.setFormatter(formatter)
+app_logger.addHandler(console_handler)
+app_logger.addHandler(file_handler)
+app_logger.propagate = False
+
+# =============================================================================
+# 1. Database Schema & Manager (New Architecture)
+# =============================================================================
+
+
+class LymphNodeSchema(LanceModel):
+    """
+    Strict Schema for LanceDB.
+    Enforces data integrity and allows for fast vector search.
+    """
+
+    slide_id: str  # Primary Key (filename)
+    wsi_id: str  # Foreign Key equivalent (Patient/Slide ID)
+    vector: Vector(VECTOR_DIM)  # 2048-dim embedding
+    cluster_id: int = -1  # -1 implies not yet clustered
+    timestamp: datetime  # Audit trail
+    path: str  # File location
+
+
+class VectorDBManager:
+    def __init__(self, db_path: str, table_name: str):
+        self.db_path = db_path
+        self.table_name = table_name
+        self.db = lancedb.connect(self.db_path)
+        self.tbl = self._init_table()
+
+    def _init_table(self):
+        if self.table_name not in self.db.table_names():
+            app_logger.info(f"Creating new Vector Table: {self.table_name}")
+            return self.db.create_table(self.table_name, schema=LymphNodeSchema)
+        else:
+            return self.db.open_table(self.table_name)
+
+    def get_existing_vectors(self, slide_ids: List[str]) -> pd.DataFrame:
+        """
+        Performance Cache: Retrieve vectors for slide_ids that already exist.
+        """
+        if not slide_ids:
+            return pd.DataFrame()
+
+        # In SQL: SELECT * FROM table WHERE slide_id IN (...)
+        # LanceDB optimization: handle large lists by chunks if necessary
+        try:
+            # Note: For massive lists (>10k), simpler to filter post-fetch or chunk query
+            quoted = [f"'{s}'" for s in slide_ids]
+            if len(quoted) > 2000:
+                # Fallback for huge batches: Fetch by WSI or fetch all (simplified for this context)
+                app_logger.info("Batch too large for IN clause, fetching larger slice...")
+                return self.tbl.to_pandas()
+
+            filter_str = f"slide_id IN ({','.join(quoted)})"
+            return self.tbl.search().where(filter_str).to_pandas()
+        except Exception as e:
+            app_logger.warning(f"Cache lookup failed, recomputing: {e}")
+            return pd.DataFrame()
+
+    def upsert_data(self, df: pd.DataFrame):
+        """
+        Operability: Updates existing records (e.g. new cluster IDs)
+        and inserts new images without wiping the DB.
+        """
+        if df.empty:
+            return
+
+        app_logger.info(f"Upserting {len(df)} records to LanceDB...")
+
+        # Convert timestamps to proper datetime objects if they are strings
+        if "timestamp" in df.columns and df["timestamp"].dtype == "O":
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+        try:
+            # Use the newer LanceDB upsert API if available
+            if hasattr(self.tbl, "upsert"):
+                self.tbl.upsert(df)
+            else:
+                # Fallback to delete + insert pattern
+                existing_ids = set(self.tbl.to_pandas()["slide_id"].tolist())
+                update_ids = set(df["slide_id"].tolist()) & existing_ids
+
+                # Delete existing records that need updating
+                if update_ids:
+                    id_list = ", ".join([f"'{sid}'" for sid in update_ids])
+                    self.tbl.delete(f"slide_id IN ({id_list})")
+
+                # Insert all records (both new and updated)
+                self.tbl.add(df)
+
+        except Exception as e:
+            app_logger.error(f"Upsert failed: {e}")
+            # Final fallback
+            self.tbl.add(df)
+
+        def search_similarity(self, query_vector: np.array, limit: int = 5, exclude_id: str = None):
+            """
+            Global Search: Find similar nodes across ALL patients.
+            """
+            search_builder = self.tbl.search(query_vector).limit(limit)
+            if exclude_id:
+                search_builder = search_builder.where(f"slide_id != '{exclude_id}'")
+            return search_builder.to_pandas()
+
+
+# Initialize DB Manager Globally
+db_manager = VectorDBManager(DEFAULT_DB_PATH, DEFAULT_TABLE_NAME)
+
+# =============================================================================
+# 2. Models & Request Objects
 # =============================================================================
 
 
 class TuningRequest(BaseModel):
-    path: str = ""  # Default to empty string to scan the whole DATA_DIR
-    ground_truth_csv: str
+    path: str = ""
+    ground_truth_csv: str = "crops_label.csv"
 
 
 class DirectoryRequest(BaseModel):
-    path: str = ""  # Default to empty string
-    # db_path: str = DEFAULT_DB_PATH
-    # table_name: str = DEFAULT_TABLE_NAME
-    threshold: Optional[float] = DEFAULT_DISTANCE_THRESHOLD
+    path: str = ""
+    threshold: Optional[float] = 0.35
 
 
-# =============================================================================
-# 2. App & Model Loading
-# =============================================================================
+class SimilarityRequest(BaseModel):
+    slide_id: str
+    limit: int = 5
 
-app = FastAPI(title="Histology Clustering API", version="1.3.0")
-app.state.feature_extractor = None
+
+app = FastAPI(title="Histology Clustering API (Vector DB Enhanced)", version="2.0.0")
 
 
 @app.on_event("startup")
 def load_model():
-    app_logger.info(f"Starting API server. Data Root: {DATA_DIR}")
     app_logger.info("Loading ResNet50 model...")
+    # Initialize without top layer for feature extraction
     base_model = ResNet50(
-        weights=MODEL_WEIGHTS, include_top=MODEL_INCLUDE_TOP, input_shape=(*IMAGE_TARGET_SIZE, 3), pooling=MODEL_POOLING
+        weights=RESNET50_LOCAL_PATH, include_top=False, input_shape=(*IMAGE_TARGET_SIZE, 3), pooling="avg"
     )
     app.state.feature_extractor = base_model
     app_logger.info("Model loaded successfully.")
 
 
 # =============================================================================
-# 3. Core Logic (Updated Parsing)
+# 3. Core Logic (Smart Extraction & Clustering)
 # =============================================================================
 
 
-def _extract_vector(model: Model, img_path: str) -> List[float]:
-    try:
-        img = image.load_img(img_path, target_size=IMAGE_TARGET_SIZE)
-        x = image.img_to_array(img)
-        x = np.expand_dims(x, axis=0)
-        x = preprocess_input(x)
-        return model.predict(x, verbose=0).flatten().tolist()
-    except Exception as e:
-        app_logger.warning(f"Failed to load {img_path}: {e}")
-        return []
+def _smart_extract_features(model: Model, image_paths: List[str]) -> pd.DataFrame:
+    """
+    Hybrid Logic:
+    1. Check LanceDB cache for vectors.
+    2. Compute missing vectors using GPU batch processing.
+    3. Save new vectors immediately.
+    """
+    path_map = {os.path.basename(p): p for p in image_paths}
+    all_slide_ids = list(path_map.keys())
+
+    # 1. Check Cache
+    app_logger.info(f"Checking cache for {len(all_slide_ids)} images...")
+    cached_df = db_manager.get_existing_vectors(all_slide_ids)
+
+    results = []
+    cached_ids = set()
+
+    if not cached_df.empty:
+        cached_ids = set(cached_df["slide_id"].tolist())
+        # Convert cached rows to list of dicts
+        for _, row in cached_df.iterrows():
+            results.append(
+                {
+                    "slide_id": row["slide_id"],
+                    "wsi_id": row["wsi_id"],
+                    "vector": row["vector"],
+                    "path": path_map.get(row["slide_id"], row["path"]),  # Update path if moved
+                    "timestamp": row["timestamp"],
+                }
+            )
+
+    app_logger.info(f"Cache hit: {len(cached_ids)} | Missing: {len(all_slide_ids) - len(cached_ids)}")
+
+    # 2. Compute Missing
+    missing_ids = [sid for sid in all_slide_ids if sid not in cached_ids]
+
+    if missing_ids:
+        # Batch Processing Loop
+        batch_images = []
+        batch_meta = []
+
+        for i, sid in enumerate(missing_ids):
+            p = path_map[sid]
+            try:
+                img = image.load_img(p, target_size=IMAGE_TARGET_SIZE)
+                x = image.img_to_array(img)
+                x = preprocess_input(x)  # ResNet preprocessing
+                batch_images.append(x)
+                batch_meta.append(
+                    {
+                        "slide_id": sid,
+                        "wsi_id": os.path.basename(os.path.dirname(p)),
+                        "path": p,
+                        "timestamp": datetime.now(),
+                    }
+                )
+            except Exception as e:
+                app_logger.warning(f"Bad image {p}: {e}")
+
+            # Process batch if full or last item
+            if len(batch_images) == BATCH_SIZE or (i == len(missing_ids) - 1 and batch_images):
+                # Inference
+                batch_arr = np.array(batch_images)
+                preds = model.predict(batch_arr, verbose=0)
+
+                new_records = []
+                for j, meta in enumerate(batch_meta):
+                    meta["vector"] = preds[j].tolist()
+                    meta["cluster_id"] = -1  # Default
+                    results.append(meta)
+                    new_records.append(meta)
+
+                # Immediate Persist: Save partial progress
+                db_manager.upsert_data(pd.DataFrame(new_records))
+
+                # Reset batch
+                batch_images = []
+                batch_meta = []
+
+    return pd.DataFrame(results)
 
 
 def _run_clustering(df: pd.DataFrame, threshold: float) -> pd.DataFrame:
+    """
+    Standard Agglomerative Clustering per WSI.
+    """
     final_dfs = []
-    single_vector = []
-    # Group by WSI ID so we cluster only within the same patient/case
-    grouped = df.groupby("wsi_id")
+    single_dfs = []
 
+    if df.empty:
+        return df
+
+    grouped = df.groupby("wsi_id")
     for wsi_id, group in grouped:
         wsi_df = group.copy()
-        vectors = np.array(wsi_df["vector"].tolist())
 
-        # Normalize for Cosine-like Euclidean distance
-        vectors_norm = normalize(vectors, axis=1, norm="l2")
-
-        if len(vectors) < 2:
+        if len(wsi_df) < 2:
             wsi_df["cluster_id"] = 0
-            single_vector.append(wsi_id)
-        else:
-            # Agglomerative Clustering with Dynamic Threshold
-            model = AgglomerativeClustering(
-                n_clusters=None, distance_threshold=threshold, metric="euclidean", linkage="average"
-            )
-            wsi_df["cluster_id"] = model.fit_predict(vectors_norm)
-
-        final_dfs.append(wsi_df)
-
-    if not final_dfs:
-        return df, single_vector
-
-    # 4. Save & Response
-    clustered_df = pd.concat(final_dfs, ignore_index=True)
-    return clustered_df, single_vector
-
-
-def _run_tuning_simulation(data_df: pd.DataFrame, ground_truth: Dict[str, int]):
-    # Test range: 0.2 (Strict) -> 1.0 (Loose)
-    test_thresholds = np.arange(0.1, 1.05, 0.05).tolist()
-    results = []
-    errors = []
-
-    app_logger.info(f"--- Starting Tuning on {len(ground_truth)} labeled WSIs ---")
-
-    for thresh in test_thresholds:
-        total_absolute_error = 0
-        match_count = 0
-        wsi_count = 0
-        single_crop_count = 0
-        error_count = 0
-
-        clustered_df, single_slides = _run_clustering(data_df, threshold=thresh)
-
-        for wsi_id, predicted_group in clustered_df.groupby("wsi_id"):
-            if wsi_id not in ground_truth:
-                continue
-
-            predicted_k = predicted_group["cluster_id"].nunique()
-            actual_k = ground_truth[wsi_id]
-            abs_error = abs(predicted_k - actual_k)
-
-            #  Check for single slide of a wsi
-            if wsi_id in single_slides:
-                single_crop_count += 1
-                if abs_error > 0:
-                    # app_logger.error(f"Critical Failure for Single Slide on WSI: {wsi_id}")
-                    error_count += 1
-                    errors.append(wsi_id)
-                    continue
-
-            total_absolute_error += abs_error
-
-            if abs_error == 0:
-                match_count += 1
-
-            wsi_count += 1
-
-        if wsi_count == 0:
+            final_dfs.append(wsi_df)
+            single_dfs.append(wsi_df)
             continue
 
-        mae = total_absolute_error / wsi_count
-        results.append(
-            {
-                "threshold": f"{thresh:.2f}",
-                "accuracy": match_count / wsi_count,
-                "mae": round(mae, 3),
-                "details": f"Avg error: {mae:.2f}",
-                "match_count": match_count,
-                "wsi_count": wsi_count,
-                "single_crop_count": single_crop_count,
-                "error_count": error_count,
-            }
+        vectors = np.vstack(wsi_df["vector"].values)
+        vectors_norm = normalize(vectors, axis=1, norm="l2")
+
+        model = AgglomerativeClustering(
+            n_clusters=None, distance_threshold=threshold, metric="euclidean", linkage="average"
         )
+        wsi_df["cluster_id"] = model.fit_predict(vectors_norm)
+        final_dfs.append(wsi_df)
 
-    results.sort(key=lambda x: x["accuracy"], reverse=True)
-    return results[0], results, list(set(errors))
-
-
-def _save_to_vectordb(clustered_df: pd.DataFrame):
-    db_path = DEFAULT_DB_PATH
-    table_name = DEFAULT_TABLE_NAME
-    try:
-        # 4. Save to LanceDB with UPSERT
-        db = lancedb.connect(db_path)
-
-        # Check if table exists, create if not
-        if table_name not in db.table_names():
-            app_logger.info(f"Creating new table: {table_name}")
-            table = db.create_table(table_name, data=clustered_df, mode="overwrite")
-            app_logger.info(f"Table schema for table:{table_name}, schema: {table.schema}")
-        else:
-            table = db.open_table(table_name)
-            # Upsert records using slide_id as the key
-            app_logger.info(f"Upserting {len(clustered_df)} records into existing table: {table_name}")
-            table.add(clustered_df, mode="overwrite")
-
-    except Exception as e:
-        app_logger.error(f"VectorDB Error: {e}", exc_info=True)
-        return False
-    return True
+    return pd.concat(final_dfs, ignore_index=True), (
+        pd.concat(single_dfs, ignore_index=True) if len(single_dfs) > 0 else None
+    )
 
 
 # =============================================================================
-# 4. API Endpoints
+# 4. Endpoints
 # =============================================================================
 
 
-@app.post("/v1/tune_parameters", response_class=JSONResponse)
-async def tune_parameters(request: TuningRequest = Body(...)):
+@app.post("/v1/cluster/from_directory", response_class=JSONResponse)
+async def cluster_from_directory(request: DirectoryRequest = Body(...)):
     """
-    Scans nested folders, matches against CSV Ground Truth, finds best Threshold.
+    1. Scan Dir
+    2. Smart Extract (Cache + Compute)
+    3. Cluster
+    4. Upsert Results
     """
     try:
-        tsnow = datetime.now().isoformat()
-        app_logger.info("=" * 64)
-        app_logger.info(f"Requesting tune_parameters on {tsnow} ...")
-        app_logger.info("=" * 64)
-        # 1. Load Ground Truth
         search_root = os.path.join(DATA_DIR, request.path)
-        label_file = os.path.join(search_root, request.ground_truth_csv)
-        gt_df = pd.read_csv(label_file)
-        gt_df.columns = [c.strip() for c in gt_df.columns]
-        # Map WSI_ID -> Count
-        ground_truth_map = dict(zip(gt_df.iloc[:, 0], gt_df.iloc[:, 1]))
-
-        # 2. Find Images (Recursive Scan)
-        # Structure: DATA_DIR / request.path / ** / *.png
-
-        app_logger.info(f"Scanning for images in: {search_root}")
+        app_logger.info(f"Scanning {search_root}...")
 
         image_paths = []
-        for ext in SUPPORTED_EXTENSIONS:
-            # Recursive glob pattern for nested folders
-            pattern = os.path.join(search_root, "**", ext.strip())
-            found = glob(pattern, recursive=True)
-            image_paths.extend(found)
+        for ext in ["*.png", "*.jpg", "*.tif"]:
+            image_paths.extend(glob(os.path.join(search_root, "**", ext), recursive=True))
 
-        app_logger.info(f"Found {len(image_paths)} images total.")
+        if not image_paths:
+            raise HTTPException(404, "No images found.")
 
-        # 3. Extract Features
-        all_data = []
-        model = app.state.feature_extractor
+        # 1. Smart Extraction
+        df_data = _smart_extract_features(app.state.feature_extractor, image_paths)
 
-        for i, p in enumerate(image_paths):
-            if i % 10 == 0:
-                app_logger.info(f"vectorizing images : {i}/{len(image_paths)}.")
+        # 2. Clustering
+        threshold = request.threshold or 0.35
+        clustered_df, _ = _run_clustering(df_data, threshold)
 
-            fname = os.path.basename(p)
-            wsi_id = os.path.basename(os.path.dirname(p))
-            slide_id = fname
+        # 3. Save to DB (Upsert)
+        db_manager.upsert_data(clustered_df)
 
-            # Optimization: Only process if in Ground Truth
-            if wsi_id in ground_truth_map:
-                vec = _extract_vector(model, p)
-                if vec:
-                    all_data.append({"slide_id": slide_id, "wsi_id": wsi_id, "timestamp": tsnow, "vector": vec})
+        # 4. Format Response
+        results = []
+        for wsi_id, w_group in clustered_df.groupby("wsi_id"):
+            clusters = []
+            for c_id, c_group in w_group.groupby("cluster_id"):
+                clusters.append(
+                    {"cluster_id": int(c_id), "count": len(c_group), "slides": c_group["slide_id"].tolist()}
+                )
+            results.append({"wsi_id": wsi_id, "clusters_count:": len(clusters), "clusters_details": clusters})
 
-        if not all_data:
-            raise HTTPException(404, "No images matched the WSI IDs in your CSV.")
+        output = {"id": str(uuid.uuid4()), "data": results}
+        app_logger.info(f"Clustering done for {search_root}, result = {output}")
 
-        data_df = pd.DataFrame(all_data)
+        return output
 
-        # 4. Run Simulation
-        best_param, all_results, errors = _run_tuning_simulation(data_df, ground_truth_map)
+    except Exception as e:
+        app_logger.error(f"Cluster Error: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
 
-        # 5. Add best result to vector db
-        clustered_df, single_slides = _run_clustering(data_df, threshold=float(best_param["threshold"]))
-        success = _save_to_vectordb(clustered_df)
 
-        result = {
-            "status": "success",
-            "recommendation": {
-                "best_threshold": best_param["threshold"],
-                "accuracy": best_param["accuracy"],
-                "mae": best_param["mae"],
-                "match_count": best_param["match_count"],
-                "wsi_count": best_param["wsi_count"],
-                "single_crop_count": best_param["single_crop_count"],
-                "corping_error_count": best_param["error_count"],
-            },
-            "details": all_results,
-            "error_list": errors,
-        }
+@app.post("/v1/find_similar_nodes")
+async def find_similar_nodes(request: SimilarityRequest = Body(...)):
+    """
+    New Feature: Find morphologically similar nodes across the database.
+    """
+    try:
+        # 1. Get the source vector from DB
+        source_df = db_manager.get_existing_vectors([request.slide_id])
+        if source_df.empty:
+            raise HTTPException(404, f"Slide ID {request.slide_id} not found in database. Run clustering first.")
 
-        app_logger.info("=" * 64)
-        app_logger.info(f"final results: {result}.")
-        app_logger.info("=" * 64)
+        query_vector = source_df.iloc[0]["vector"]
 
-        return result
+        # 2. Global Search
+        similar_df = db_manager.search_similarity(
+            query_vector, limit=request.limit + 1, exclude_id=request.slide_id  # Fetch extra to account for self-match
+        )
+
+        # 3. Format
+        matches = []
+        for _, row in similar_df.iterrows():
+            matches.append(
+                {
+                    "slide_id": row["slide_id"],
+                    "wsi_id": row["wsi_id"],
+                    "distance": float(row["_distance"]) if "_distance" in row else 0.0,
+                    "path": row["path"],
+                }
+            )
+
+        return {"query_id": request.slide_id, "matches": matches}
+
+    except Exception as e:
+        app_logger.error(f"Search Error: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
+@app.post("/v1/tune_parameters")
+async def tune_parameters(request: TuningRequest = Body(...)):
+    """
+    Uses Smart Extract to speed up tuning iterations.
+    """
+    try:
+        # Load Ground Truth
+        search_root = os.path.join(DATA_DIR, request.path)
+
+        app_logger.info(f"Parameter Tuning: scanning {search_root}...")
+
+        gt_path = os.path.join(search_root, request.ground_truth_csv)
+        if not os.path.exists(gt_path):
+            raise HTTPException(404, "Ground truth CSV not found.")
+
+        gt_df = pd.read_csv(gt_path)
+        gt_df.columns = [c.strip() for c in gt_df.columns]
+        ground_truth_map = dict(zip(gt_df["image_name"], gt_df["lymph_node_total_num"]))
+
+        # Scan & Extract
+        image_paths = []
+        for ext in ["*.png"]:
+            image_paths.extend(glob(os.path.join(search_root, "**", ext), recursive=True))
+
+        # Filter for only those in Ground Truth to save time
+        relevant_paths = [p for p in image_paths if os.path.basename(os.path.dirname(p)) in ground_truth_map]
+
+        # Retrieve/Compute Vectors
+        data_df = _smart_extract_features(app.state.feature_extractor, relevant_paths)
+
+        # Run Simulation (Logic borrowed from your original code)
+        test_thresholds = np.arange(0.1, 1.05, 0.05).tolist()
+        results = []
+
+        for thresh in test_thresholds:
+            temp_df, single_slide_df = _run_clustering(data_df, threshold=thresh)
+            total_error = 0
+            wsi_count = 0
+            hit_count = 0
+
+            for wsi_id, group in temp_df.groupby("wsi_id"):
+                if wsi_id in ground_truth_map:
+                    pred_k = group["cluster_id"].nunique()
+                    actual_k = ground_truth_map[wsi_id]
+
+                    # Data Error in Label, if there is just one slide, it must be one cluster
+                    if wsi_id in single_slide_df["wsi_id"].tolist():
+                        if pred_k == 1:
+                            actual_k = 1
+
+                    abs_error = abs(pred_k - actual_k)
+
+                    if abs_error == 0:
+                        hit_count += 1
+
+                    total_error += abs_error
+                    wsi_count += 1
+
+            if wsi_count > 0:
+                results.append(
+                    {
+                        "threshold": round(thresh, 2),
+                        "accuracy": round(hit_count / wsi_count, 3),
+                        "mae": round(total_error / wsi_count, 3),
+                        "hit_count": hit_count,
+                        "wsi_count": wsi_count,
+                    }
+                )
+
+        results.sort(key=lambda x: x["mae"])
+        output = {"best_parameter": results[0], "all_results": results}
+
+        app_logger.info(f"Parameter Tuning done for {search_root}, best result = {output["best_parameter"]}")
+        return output
 
     except Exception as e:
         app_logger.error(f"Tuning Error: {e}", exc_info=True)
         raise HTTPException(500, str(e))
 
 
-@app.post("/v1/cluster/from_directory", response_class=JSONResponse)
-async def cluster_from_directory(request: DirectoryRequest = Body(...)):
-    """
-    Production Endpoint. Recursive scan + Clustering.
-    """
-    try:
-        tsnow = datetime.now().isoformat()
-        # 1. Recursive Scan
-        search_root = os.path.join(DATA_DIR, request.path)
-        app_logger.info(f"Clustering images in: {search_root} at {tsnow}")
-
-        image_paths = []
-        for ext in SUPPORTED_EXTENSIONS:
-            pattern = os.path.join(search_root, "**", ext.strip())
-            image_paths.extend(glob(pattern, recursive=True))
-
-        if not image_paths:
-            raise HTTPException(404, "No images found.")
-
-        # 2. Feature Extraction
-        all_data = []
-        model = app.state.feature_extractor
-
-        for p in image_paths:
-            fname = os.path.basename(p)
-            wsi_id = os.path.basename(os.path.dirname(p))
-            slide_id = fname
-            vec = _extract_vector(model, p)
-            if vec:
-                all_data.append({"slide_id": slide_id, "wsi_id": wsi_id, "timestamp": tsnow, "vector": vec})
-
-        if not all_data:
-            raise HTTPException(400, "No valid images processed.")
-
-        # 3. Cluster
-        active_thresh = request.threshold if request.threshold is not None else DEFAULT_DISTANCE_THRESHOLD
-        clustered_df, single_slide = _run_clustering(pd.DataFrame(all_data), threshold=active_thresh)
-        success = _save_to_vectordb(clustered_df)
-
-        results = []
-        for wsi_id, w_group in clustered_df.groupby("wsi_id"):
-            clusters = []
-            for c_id, c_group in w_group.groupby("cluster_id"):
-                clusters.append({"cluster_id": int(c_id), "slides": c_group["slide_id"].tolist()})
-            results.append({"wsi_id": wsi_id, "cluster_count": len(clusters), "clusters": clusters})
-
-        app_logger.info(f"cluster results: {results}.")
-
-        return JSONResponse(
-            content={"id": str(uuid.uuid4()), "choices": [{"message": {"content": json.dumps(results)}}]}
-        )
-
-    except Exception as e:
-        app_logger.error(f"Error: {e}", exc_info=True)
-        raise HTTPException(500, str(e))
+def start_server():
+    """Entry point for the 'histology-api' command."""
+    uvicorn.run(
+        "app:app",
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=DEBUG_MODE,  # Reload must be False for production scripts
+    )
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host=HOST, port=PORT, reload=DEBUG)
+    start_server()

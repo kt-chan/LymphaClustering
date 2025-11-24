@@ -16,6 +16,9 @@
             "type": "debugpy",
             "request": "launch",
             "program": "lymphaclustering/app.py",
+            "args": [
+                "start_server"
+            ],
             "justMyCode": true,
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.env"
@@ -27,8 +30,7 @@
             // Use 'python -m uvicorn' to launch the server as a module
             "module": "uvicorn",
             "args": [
-                "lymphaclustering/app:app",
-                "--reload"
+                "lymphaclustering/app:start_server"
             ],
             // Stop the server when debugging ends
             "justMyCode": true,

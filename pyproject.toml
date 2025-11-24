@@ -1,20 +1,28 @@
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lymphaclustering"
 version = "1.0.0"
 description = "API for clustering WSI slides using ResNet50 and LanceDB"
-authors = [
-    {name = "chan chi wai", email = "your.email@example.com"},
-]
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
-license-files = ["LICENSE*"]  # Glob pattern for license files
+license = {text = "MIT"}
+authors = [
+    {name = "chan chi wai", email = "your.email@example.com"}
+]
 keywords = ["histology", "clustering", "machine-learning", "fastapi", "lancedb"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Medical Science Apps."
+]
 
 dependencies = [
     # NOTE: TF 2.20.0 does not exist yet. Using >=2.17.0 to support NumPy 2.0
     "tensorflow>=2.17.0", 
-    "numpy<2.3.0,>=2",
+    "numpy>=1.26.0,<2.0.0",
     "Pillow>=10.4.0",
     
     # --- Core Scientific Computing ---
@@ -24,13 +32,14 @@ dependencies = [
     # --- Vector Database ---
     "lancedb>=0.25.3",
     "pyarrow>=17.0.0",
+    "pydantic>=2.9.0",
     
     # --- API Framework ---
-    "fastapi==0.121.2",
+    "fastapi>=0.110.2",
     "uvicorn[standard]==0.38.0",
     "python-multipart==0.0.20",
 
-    # ---- Torch with CUDA ----
+    # ---- Torch with CUDA (Optional/Commented) ----
     # "timm==0.9.8",
     # "torch==2.8.0",
     # "torchvision==0.23.0",
@@ -41,20 +50,19 @@ dependencies = [
 ]
 
 [project.scripts]
-histology-api = "lymphaclustering.app:app"
-
-[build-system]
-requires = ["setuptools>=70.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# FIXED: Points to the function 'start_server', not the object 'app'
+histology-api = "lymphaclustering.app:start_server"
 
 [tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
 exclude = ["db*", "data*", "tests*", "test*", "docs*", "doc*", "examples*"] 
 
 # UV package manager configuration for China mirrors
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 extra-index-url = [
-    "https://mirrors.aliyun.com/pypi/simple/",
+    "https://mirrors.aliyun.com/pypi/simple",
     "https://pypi.org/simple"
 ]
 
