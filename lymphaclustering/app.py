@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 # --- API & Server ---
 import uvicorn
 from fastapi import FastAPI, HTTPException, Body
+from fastapi_standalone_docs import StandaloneDocs
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -188,7 +189,10 @@ class SimilarityRequest(BaseModel):
     limit: int = 5
 
 
-app = FastAPI(title="Histology Clustering API (Vector DB Enhanced)", version="2.0.0")
+app = FastAPI(title="Histology Clustering API", version="1.0.0")
+
+# Apply the standalone docs to your app
+StandaloneDocs(app=app)
 
 
 @app.on_event("startup")

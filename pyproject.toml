@@ -36,6 +36,7 @@ dependencies = [
     
     # --- API Framework ---
     "fastapi>=0.110.2",
+    "fastapi-standalone-docs>=0.2.0",
     "uvicorn[standard]==0.38.0",
     "python-multipart==0.0.20",
 
