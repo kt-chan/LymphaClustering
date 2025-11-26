@@ -365,7 +365,7 @@ async def cluster_from_directory(request: DirectoryRequest = Body(...)):
                 clusters.append(
                     {"cluster_id": int(c_id), "count": len(c_group), "slides": c_group["slide_id"].tolist()}
                 )
-            results.append({"wsi_id": wsi_id, "clusters_count:": len(clusters), "clusters_details": clusters})
+            results.append({"wsi_id": wsi_id, "clusters_count": len(clusters), "clusters_details": clusters})
 
         output = {"id": str(uuid.uuid4()), "data": results}
         app_logger.info(f"Clustering done for {search_root}, result = {output}")
