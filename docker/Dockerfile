@@ -31,9 +31,9 @@ ENV CONDA_DIR=/opt/conda
 ENV PATH=$CONDA_DIR/bin:$PATH
 
 # Download Miniconda installer explicitly from Tsinghua mirror
-RUN curl -L "https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh" -o miniconda.sh \
-    && bash miniconda.sh -b -p $CONDA_DIR \
-    && rm miniconda.sh
+# RUN curl -L "https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-latest-Linux-x86_64.sh" -o miniconda.sh \
+#     && bash miniconda.sh -b -p $CONDA_DIR \
+#     && rm miniconda.sh
 
 # ---------------------------------------------------------------------------------------
 # 3. CONDA CONFIGURATION
@@ -101,6 +101,10 @@ RUN chmod u+x ./*.sh
 # 7. RUNTIME
 # ---------------------------------------------------------------------------------------
 EXPOSE 8000
+
+# Set Python path
+ENV PYTHONPATH=/app:$PYTHONPATH
+WORKDIR /app/lymphaclustering
 
 # Launch the API using the script entrypoint defined in pyproject.toml
 # Use ENTRYPOINT for the script

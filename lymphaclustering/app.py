@@ -15,7 +15,6 @@ from fastapi import FastAPI, HTTPException, Body
 from fastapi_standalone_docs import StandaloneDocs
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
-import cv2
 from scipy import ndimage
 
 # --- ML & Data ---
@@ -28,8 +27,8 @@ from tensorflow.keras.models import Model
 from dotenv import load_dotenv
 
 # --- Custom modules ---
-from util.app_logger import app_logger
-from db.dbmanager import VectorDBManager, VECTOR_DIM
+from app_logger import app_logger
+from db_manager import VectorDBManager, VECTOR_DIM
 
 load_dotenv()
 

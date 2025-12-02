@@ -12,13 +12,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../lymphaclustering/app.py:/app/lymphaclustering/app.py
-      - ../models:/app/models
+      - ../lymphaclustering:/app/lymphaclustering
+      - ../../models:/app/models
       - ../data:/app/data
       - ../db:/app/db
       - ../logs:/app/logs
       - ../.env:/app/.env
-    working_dir: /app
+      - /etc/localtime:/etc/localtime:ro
+    working_dir: /app/lymphaclustering
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1

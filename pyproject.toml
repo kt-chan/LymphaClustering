@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=70.0.0", "wheel"]
+requires = ["setuptools>=65.5.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "chan chi wai", email = "your.email@example.com"}
+    {name = "chan chi wai", email = "chan.chiwai@huawei.com"}
 ]
 keywords = ["histology", "clustering", "machine-learning", "fastapi", "lancedb"]
 classifiers = [
@@ -56,7 +56,7 @@ histology-api = "lymphaclustering.app:start_server"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["*"]
+include = ["lymphaclustering*"]
 exclude = ["db*", "data*", "tests*", "test*", "docs*", "doc*", "examples*"] 
 
 # UV package manager configuration for China mirrors

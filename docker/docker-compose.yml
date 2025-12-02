@@ -18,6 +18,7 @@ services:
       - /mnt/dcs_ai/share/lymphaclustering/db:/app/db
       - /mnt/dcs_ai/share/lymphaclustering/logs:/app/logs
       - /mnt/dcs_ai/share/lymphaclustering/.env:/app/.env
+      - /etc/localtime:/etc/localtime:ro
     working_dir: /app
     environment:
       - PYTHONPATH=/app
