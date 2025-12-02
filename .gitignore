@@ -32,4 +32,8 @@ Thumbs.db
 *.log
 logs/
 
+# mask
+masks/
+archive/
+
 lymphaclustering.egg-info
