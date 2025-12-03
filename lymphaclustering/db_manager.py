@@ -28,6 +28,7 @@ class LymphNodeSchema(LanceModel):
     wsi_id: str
     vector: Vector(VECTOR_DIM)
     cluster_id: int = -1
+    threshold: Optional[float]
     timestamp: datetime
     path: str
 
