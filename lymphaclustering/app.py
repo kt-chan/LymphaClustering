@@ -38,11 +38,9 @@ load_dotenv()
 
 DATA_DIR = os.getenv("DATA_DIR", r"D:/data/ruijin/Data/crops")
 
-# NOTE: For HuggingFace offline mode, this path should be a FOLDER containing 
+# NOTE: For HuggingFace offline mode, this path should be a FOLDER containing
 # config.json, pytorch_model.bin, and preprocessor_config.json
-RESNET50_LOCAL_PATH = os.getenv(
-    "RESNET50_LOCAL_PATH", r"D:/models/resnet-50"
-)
+RESNET50_LOCAL_PATH = os.getenv("RESNET50_LOCAL_PATH", r"D:/models/resnet-50")
 
 MASK_OUTPUT_DIR = "masks"
 os.makedirs(MASK_OUTPUT_DIR, exist_ok=True)
@@ -57,7 +55,7 @@ THRESHOLD_INCREMENT = 1.02
 THRESHOLD_INCREMENT_DEPTH = 3
 
 # Target size is handled by the Processor, but useful to keep for consistency if needed
-IMAGE_TARGET_SIZE = (224, 224) 
+IMAGE_TARGET_SIZE = (224, 224)
 BATCH_SIZE = 32
 
 # Clustering Settings
@@ -108,16 +106,16 @@ def startup_tasks():
     """Initialize application on startup."""
     # 1. Load Model (PyTorch / Hugging Face)
     app_logger.info(f"Loading ResNet50 model from {RESNET50_LOCAL_PATH} on {DEVICE}...")
-    
+
     try:
         # Load Processor and Model from local directory
         processor = AutoImageProcessor.from_pretrained(RESNET50_LOCAL_PATH, local_files_only=True)
         # We use ResNetModel (Base) to get feature vectors (avg pooling), not class logits
         model = ResNetModel.from_pretrained(RESNET50_LOCAL_PATH, local_files_only=True)
-        
+
         model.to(DEVICE)
-        model.eval() # Set to evaluation mode
-        
+        model.eval()  # Set to evaluation mode
+
         app.state.processor = processor
         app.state.model = model
         app_logger.info("Model loaded successfully.")
@@ -143,7 +141,9 @@ def startup_tasks():
 # =============================================================================
 
 
-def _smart_extract_features(model: ResNetModel, image_paths: List[str], threshold: float = DEFAULT_THRESHOLD) -> pd.DataFrame:
+def _smart_extract_features(
+    model: ResNetModel, image_paths: List[str], threshold: float = DEFAULT_THRESHOLD
+) -> pd.DataFrame:
     """Extract features from images with caching via VectorDB."""
     path_map = {os.path.basename(p): p for p in image_paths}
     all_slide_ids = list(path_map.keys())
@@ -178,7 +178,7 @@ def _smart_extract_features(model: ResNetModel, image_paths: List[str], threshol
     app_logger.info(f"Cache hit rate: {len(cached_ids)} / {len(image_paths)}")
 
     if missing_ids:
-        batch_images = [] # This will hold PIL Images
+        batch_images = []  # This will hold PIL Images
         batch_meta = []
         new_records_for_buffer = []
         processor = app.state.processor
@@ -211,12 +211,12 @@ def _smart_extract_features(model: ResNetModel, image_paths: List[str], threshol
 
                     with torch.no_grad():
                         outputs = model(**inputs)
-                    
+
                     # Get pooled output (Batch, 2048, 1, 1) -> Flatten to (Batch, 2048)
                     # ResNetModel output usually has 'pooler_output' or 'last_hidden_state'
                     # We want pooler_output for global average pooling equivalent
                     embeddings = outputs.pooler_output.squeeze()
-                    
+
                     # Handle case where batch size is 1 (squeeze removes too many dims)
                     if len(embeddings.shape) == 1:
                         embeddings = embeddings.unsqueeze(0)
@@ -229,10 +229,10 @@ def _smart_extract_features(model: ResNetModel, image_paths: List[str], threshol
                         meta["threshold"] = threshold
                         results.append(meta)
                         new_records_for_buffer.append(meta)
-                
+
                 except Exception as e:
                     app_logger.error(f"Inference error on batch: {e}")
-                
+
                 # Clear batch
                 batch_images = []
                 batch_meta = []
@@ -252,11 +252,11 @@ def _pre_process_image(img_path: str, greyScale: bool = False) -> Image.Image:
     try:
         # Load image with PIL
         img = Image.open(img_path)
-        
+
         # Handle grayscale / color conversion
-        if greyScale or img.mode != 'RGB':
-            img = img.convert('RGB')
-        
+        if greyScale or img.mode != "RGB":
+            img = img.convert("RGB")
+
         return img
 
     except Exception as e:
@@ -742,5 +742,16 @@ async def rotate_logs():
         raise HTTPException(500, str(e))
 
 
+def main():
+    """Main entry point for the application."""
+    DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
+    uvicorn.run(
+        "app:app",  # Changed if your file is named differently
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=DEBUG_MODE,
+    )
+
+
 if __name__ == "__main__":
-    uvicorn.run("app:app", host=os.getenv("HOST", "0.0.0.0"), port=int(os.getenv("PORT", "8000")), reload=DEBUG_MODE)
+    main()

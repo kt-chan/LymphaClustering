@@ -4,10 +4,11 @@ timm==0.9.8
 torch==2.8.0+cu128
 torchvision==0.23.0+cu128
 torchaudio==2.8.0+cu128
+transformers>=4.30.0,<5.0.0
 protobuf>=4.25.3     # Constraint to prevent Protobuf version mismatch warnings
 numpy>=1.26.0,<2.0.0               # CRITICAL PIN: Maximum compatible NumPy for TensorFlow 2.17
 Pillow>=10.4.0              # Latest stable Pillow
-
+scipy>=1.10.0,<2.0.0
 
 # --- Core Scientific Computing ---
 pandas>=2.2.2               # Latest stable version
@@ -27,3 +28,4 @@ python-multipart>=0.0.20
 
 # ---- others ----
 python-dotenv>=1.0.0
+python-multipart>=0.0.6,<0.1.0
