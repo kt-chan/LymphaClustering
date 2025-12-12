@@ -13,11 +13,11 @@ services:
       - "8000:8000"
     volumes:
       - /mnt/dcs_ai/share/lymphaclustering/lymphaclustering:/app/lymphaclustering
-      - /mnt/dcs_ai/share/lymphaclustering/models:/app/models
-      - /mnt/dcs_ai/share/lymphaclustering/data:/app/data
-      - /mnt/dcs_ai/share/lymphaclustering/db:/app/db
-      - /mnt/dcs_ai/share/lymphaclustering/logs:/app/logs
-      - /mnt/dcs_ai/share/lymphaclustering/.env:/app/.env
+      - /mnt/dcs_ai/share/lymphaclustering/models:/app/lymphaclustering/models
+      - /mnt/dcs_ai/share/lymphaclustering/data:/app/lymphaclustering/data
+      - /mnt/dcs_ai/share/lymphaclustering/db:/app/lymphaclustering/db
+      - /mnt/dcs_ai/share/lymphaclustering/logs:/app/lymphaclustering/logs
+      - /mnt/dcs_ai/share/lymphaclustering/.env:/app/lymphaclustering/.env
       - /etc/localtime:/etc/localtime:ro
     working_dir: /app/lymphaclustering
     environment:
