@@ -50,7 +50,7 @@ os.makedirs(MASK_OUTPUT_DIR, exist_ok=True)
 DEBUG_MODE = os.getenv("DEBUG", "False").lower() == "true"
 DEFAULT_DB_PATH = os.getenv("DEFAULT_DB_PATH", "lancedb_histology")
 DEFAULT_TABLE_NAME = os.getenv("DEFAULT_TABLE_NAME", "histology_specimens")
-DEFAULT_THRESHOLD = 0.36
+DEFAULT_THRESHOLD = 0.56
 
 # Updated to 5% increment as requested
 THRESHOLD_INCREMENT = 1.02
