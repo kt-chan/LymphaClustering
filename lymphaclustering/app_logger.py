@@ -106,18 +106,18 @@ def get_rotation_info() -> Dict[str, Any]:
     }
 
 
-def rotate_logs_now(logger: logging.Logger) -> bool:
+def rotate_logs_now() -> bool:
     """Manually trigger log rotation."""
-    for handler in logger.handlers:
+    for handler in app_logger.handlers:
         if isinstance(handler, TimedRotatingFileHandler):
             try:
                 handler.doRollover()
-                logger.info("Manual log rotation completed")
+                app_logger.info("Manual log rotation completed")
                 return True
             except Exception as e:
-                logger.error(f"Failed to rotate logs: {e}")
+                app_logger.error(f"Failed to rotate logs: {e}")
                 return False
-    logger.warning("No TimedRotatingFileHandler found")
+    app_logger.warning("No TimedRotatingFileHandler found")
     return False
 
 

@@ -88,6 +88,7 @@ COPY pyproject.toml README.md ./
 # Install dependencies via UV
 # --system: Installs into the active Conda environment (app_env)
 # --no-dev: Skips development dependencies
+RUN pip install setuptools>=65.5.0
 RUN pip install .
 
 # Copy the rest of the source code
@@ -101,10 +102,6 @@ RUN chmod u+x ./*.sh
 # 7. RUNTIME
 # ---------------------------------------------------------------------------------------
 EXPOSE 8000
-
-# Set Python path
-ENV PYTHONPATH=/app:$PYTHONPATH
-WORKDIR /app/lymphaclustering
 
 # Launch the API using the script entrypoint defined in pyproject.toml
 # Use ENTRYPOINT for the script

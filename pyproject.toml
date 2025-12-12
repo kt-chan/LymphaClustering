@@ -20,8 +20,6 @@ classifiers = [
 ]
 
 dependencies = [
-    # NOTE: TF 2.20.0 does not exist yet. Using >=2.17.0 to support NumPy 2.0
-    "tensorflow>=2.17.0", 
     "numpy>=1.26.0,<2.0.0",
     "Pillow>=10.4.0",
     
@@ -41,10 +39,10 @@ dependencies = [
     "python-multipart==0.0.20",
 
     # ---- Torch with CUDA (Optional/Commented) ----
-    # "timm==0.9.8",
-    # "torch==2.8.0",
-    # "torchvision==0.23.0",
-    # "torchaudio==2.8.0",
+    "timm==0.9.8",
+    "torch==2.8.0+cu128",
+    "torchvision==0.23.0+cu128",
+    "torchaudio==2.8.0+cu128",
 
     # --- Environment & Utilities ---
     "python-dotenv>=1.0.0",

@@ -1,0 +1,14 @@
+{
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "**/old_code",
+        "**/venv",
+        "**/tests",
+        "**/build",
+        "**/data",
+        "**/db",
+        "**/logs",
+        "**/run"
+    ]
+}

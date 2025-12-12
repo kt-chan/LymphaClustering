@@ -1,4 +1,3 @@
-# main.py (refactored)
 import numpy as np
 import os
 import json
@@ -17,14 +16,14 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 from scipy import ndimage
 
-# --- ML & Data ---
+# --- ML & Data (PyTorch / Hugging Face) ---
+import torch
+from transformers import AutoImageProcessor, ResNetModel
+from PIL import Image
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
-from sklearn.metrics import silhouette_score  # <--- Added for validation
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
-from tensorflow.keras.models import Model
+from sklearn.metrics import silhouette_score
 from dotenv import load_dotenv
 
 # --- Custom modules ---
@@ -38,9 +37,13 @@ load_dotenv()
 # =============================================================================
 
 DATA_DIR = os.getenv("DATA_DIR", r"D:/data/ruijin/Data/crops")
+
+# NOTE: For HuggingFace offline mode, this path should be a FOLDER containing 
+# config.json, pytorch_model.bin, and preprocessor_config.json
 RESNET50_LOCAL_PATH = os.getenv(
-    "RESNET50_LOCAL_PATH", r"D:/models/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5"
+    "RESNET50_LOCAL_PATH", r"D:/models/resnet-50"
 )
+
 MASK_OUTPUT_DIR = "masks"
 os.makedirs(MASK_OUTPUT_DIR, exist_ok=True)
 
@@ -53,12 +56,16 @@ DEFAULT_THRESHOLD = 0.36
 THRESHOLD_INCREMENT = 1.02
 THRESHOLD_INCREMENT_DEPTH = 3
 
-IMAGE_TARGET_SIZE = (224, 224)
+# Target size is handled by the Processor, but useful to keep for consistency if needed
+IMAGE_TARGET_SIZE = (224, 224) 
 BATCH_SIZE = 32
 
 # Clustering Settings
 BUFFER_FLUSH_INTERVAL_SECONDS = 60
 BUFFER_BATCH_LIMIT = 2000
+
+# Device configuration
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # =============================================================================
 # Models & Request Objects
@@ -92,20 +99,31 @@ db_manager = VectorDBManager(
     DEFAULT_DB_PATH, DEFAULT_TABLE_NAME, flush_interval=BUFFER_FLUSH_INTERVAL_SECONDS, batch_limit=BUFFER_BATCH_LIMIT
 )
 
-app = FastAPI(title="Histology Clustering API", version="1.1.0")
+app = FastAPI(title="Histology Clustering API (PyTorch)", version="1.2.0")
 StandaloneDocs(app=app)
 
 
 @app.on_event("startup")
 def startup_tasks():
     """Initialize application on startup."""
-    # 1. Load Model
-    app_logger.info("Loading ResNet50 model...")
-    base_model = ResNet50(
-        weights=RESNET50_LOCAL_PATH, include_top=False, input_shape=(*IMAGE_TARGET_SIZE, 3), pooling="avg"
-    )
-    app.state.feature_extractor = base_model
-    app_logger.info("Model loaded.")
+    # 1. Load Model (PyTorch / Hugging Face)
+    app_logger.info(f"Loading ResNet50 model from {RESNET50_LOCAL_PATH} on {DEVICE}...")
+    
+    try:
+        # Load Processor and Model from local directory
+        processor = AutoImageProcessor.from_pretrained(RESNET50_LOCAL_PATH, local_files_only=True)
+        # We use ResNetModel (Base) to get feature vectors (avg pooling), not class logits
+        model = ResNetModel.from_pretrained(RESNET50_LOCAL_PATH, local_files_only=True)
+        
+        model.to(DEVICE)
+        model.eval() # Set to evaluation mode
+        
+        app.state.processor = processor
+        app.state.model = model
+        app_logger.info("Model loaded successfully.")
+    except Exception as e:
+        app_logger.error(f"Failed to load model: {e}")
+        raise e
 
     # 2. Start Maintenance Scheduler (Daily Compaction)
     def daily_optimize():
@@ -125,7 +143,7 @@ def startup_tasks():
 # =============================================================================
 
 
-def _smart_extract_features(model: Model, image_paths: List[str], threshold: float = DEFAULT_THRESHOLD) -> pd.DataFrame:
+def _smart_extract_features(model: ResNetModel, image_paths: List[str], threshold: float = DEFAULT_THRESHOLD) -> pd.DataFrame:
     """Extract features from images with caching via VectorDB."""
     path_map = {os.path.basename(p): p for p in image_paths}
     all_slide_ids = list(path_map.keys())
@@ -160,16 +178,17 @@ def _smart_extract_features(model: Model, image_paths: List[str], threshold: flo
     app_logger.info(f"Cache hit rate: {len(cached_ids)} / {len(image_paths)}")
 
     if missing_ids:
-        batch_images = []
+        batch_images = [] # This will hold PIL Images
         batch_meta = []
         new_records_for_buffer = []
+        processor = app.state.processor
 
         app_logger.info(f"Performing vectorization for {len(missing_ids)} images.")
 
         for i, sid in enumerate(missing_ids):
             p = path_map[sid]
             try:
-                # Use the preprocessing function
+                # Use the preprocessing function (returns PIL Image)
                 processed_img = _pre_process_image(p)
                 batch_images.append(processed_img)
                 batch_meta.append(
@@ -185,15 +204,36 @@ def _smart_extract_features(model: Model, image_paths: List[str], threshold: flo
 
             # Process Batch
             if len(batch_images) == BATCH_SIZE or (i == len(missing_ids) - 1 and batch_images):
-                preds = model.predict(np.array(batch_images), verbose=0)
+                try:
+                    # HF Processor handles resizing and normalization
+                    inputs = processor(images=batch_images, return_tensors="pt")
+                    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
 
-                for j, meta in enumerate(batch_meta):
-                    meta["vector"] = preds[j].tolist()
-                    meta["cluster_id"] = -1
-                    meta["threshold"] = -1
-                    results.append(meta)
-                    new_records_for_buffer.append(meta)
+                    with torch.no_grad():
+                        outputs = model(**inputs)
+                    
+                    # Get pooled output (Batch, 2048, 1, 1) -> Flatten to (Batch, 2048)
+                    # ResNetModel output usually has 'pooler_output' or 'last_hidden_state'
+                    # We want pooler_output for global average pooling equivalent
+                    embeddings = outputs.pooler_output.squeeze()
+                    
+                    # Handle case where batch size is 1 (squeeze removes too many dims)
+                    if len(embeddings.shape) == 1:
+                        embeddings = embeddings.unsqueeze(0)
 
+                    preds = embeddings.cpu().numpy()
+
+                    for j, meta in enumerate(batch_meta):
+                        meta["vector"] = preds[j].tolist()
+                        meta["cluster_id"] = -1
+                        meta["threshold"] = threshold
+                        results.append(meta)
+                        new_records_for_buffer.append(meta)
+                
+                except Exception as e:
+                    app_logger.error(f"Inference error on batch: {e}")
+                
+                # Clear batch
                 batch_images = []
                 batch_meta = []
 
@@ -204,24 +244,20 @@ def _smart_extract_features(model: Model, image_paths: List[str], threshold: flo
     return pd.DataFrame(results)
 
 
-def _pre_process_image(img_path: str, greyScale: bool = False) -> np.array:
+def _pre_process_image(img_path: str, greyScale: bool = False) -> Image.Image:
     """
-    Preprocess an image by loading it in grayscale and converting to 3-channel RGB.
+    Preprocess an image by loading it using PIL.
+    Returns a PIL Image object (processor handles array conversion).
     """
     try:
-        # Load image in grayscale
-        if greyScale:
-            img = image.load_img(img_path, target_size=IMAGE_TARGET_SIZE, color_mode="grayscale")
-            x = image.img_to_array(img)  # Shape: (224, 224, 1)
-            # Convert grayscale to RGB by repeating the single channel 3 times
-            x = np.repeat(x, 3, axis=-1)  # Shape: (224, 224, 3)
-        else:
-            img = image.load_img(img_path, target_size=IMAGE_TARGET_SIZE)
-            x = image.img_to_array(img)  # Shape: (224, 224, 1)
-
-        # Apply ResNet50 preprocessing
-        x = preprocess_input(x)
-        return x
+        # Load image with PIL
+        img = Image.open(img_path)
+        
+        # Handle grayscale / color conversion
+        if greyScale or img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        return img
 
     except Exception as e:
         raise ValueError(f"Failed to preprocess image {img_path}: {e}")
@@ -391,11 +427,6 @@ def _reassign_orphans_dynamic(wsi_df: pd.DataFrame, initial_threshold: float = 0
     new_score = _calculate_score(proposed_df)
     app_logger.debug(f"New Silhouette Score: {new_score:.4f}")
 
-    # Check if we improved or maintained quality.
-    # Use > instead of >= to ensure strictly better or we prefer the simplicity of original?
-    # Usually strictly better is safer, but >= is acceptable if we really want to reduce orphan count.
-    # The prompt says "validate... is better than pre reassignment".
-
     if new_score > original_score:
         app_logger.debug(f"Reassignment successful. Score improved: {original_score:.4f} -> {new_score:.4f}")
         return proposed_df
@@ -466,7 +497,7 @@ async def cluster_from_directory(request: DirectoryRequest = Body(...)):
         recursive_cluster = request.recursive_cluster
 
         # 2. Smart Extract
-        df_data = _smart_extract_features(app.state.feature_extractor, image_paths, threshold)
+        df_data = _smart_extract_features(app.state.model, image_paths, threshold)
 
         # 3. Clustering
         clustered_df = _run_clustering(df_data, threshold, recursive_cluster)
@@ -532,7 +563,7 @@ async def tune_parameters(request: TuningRequest = Body(...)):
         relevant_paths = [p for p in image_paths if os.path.basename(os.path.dirname(p)) in ground_truth_map]
 
         app_logger.info(f"Vectorizing {len(relevant_paths)} images...")
-        data_df = _smart_extract_features(app.state.feature_extractor, relevant_paths)
+        data_df = _smart_extract_features(app.state.model, relevant_paths)
         app_logger.info(f"Images vectorization done for {len(data_df)} images.")
 
         # Tuning with Early Stopping
